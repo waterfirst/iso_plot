@@ -79,10 +79,16 @@ def create_plotly_smooth_polar_plot(df_long, vmin, vmax, cmap='Jet', resolution=
         theta_grid, phi_grid = np.meshgrid(theta_interp, phi_interp, indexing='ij')
         points = np.stack([theta_grid.ravel(), phi_grid.ravel()], axis=-1)
         luminance_interp = f_interp(points).reshape(theta_grid.shape)
-    except:
+    except Exception as e:
         # 보간 실패시 원본 데이터 사용
+        st.warning(f"보간 실패, 원본 데이터 사용: {str(e)}")
         theta_grid, phi_grid = np.meshgrid(theta_vals, phi_vals)
-        luminance_grid = df_pivot.values
+        luminance_grid = np.zeros_like(theta_grid)
+        for i, phi in enumerate(phi_vals):
+            for j, theta in enumerate(theta_vals):
+                mask = (df_long['Phi'] == phi) & (df_long['Theta'] == theta)
+                if mask.any():
+                    luminance_grid[i, j] = df_long.loc[mask, 'Luminance'].iloc[0]
         luminance_interp = luminance_grid.T
     
     # Plotly 컬러맵 설정
@@ -114,8 +120,7 @@ def create_plotly_smooth_polar_plot(df_long, vmin, vmax, cmap='Jet', resolution=
             cmax=vmax,
             showscale=True,
             colorbar=dict(
-                title="Luminance",
-                titleside="right",
+                title=dict(text="Luminance", side="right"),
                 tickmode="linear",
                 tick0=vmin,
                 dtick=(vmax-vmin)/5
@@ -171,8 +176,13 @@ def create_plotly_cartesian_plot(df_long, vmin, vmax, cmap='Jet', resolution=300
     try:
         rbf = Rbf(x, y, df_long['Luminance'], function='multiquadric', smooth=0.1)
         zi = rbf(xi_grid, yi_grid)
-    except:
-        zi = griddata((x, y), df_long['Luminance'], (xi_grid, yi_grid), method='linear')
+    except Exception as e:
+        st.warning(f"RBF 보간 실패, griddata 사용: {str(e)}")
+        try:
+            zi = griddata((x, y), df_long['Luminance'], (xi_grid, yi_grid), method='linear')
+        except Exception as e2:
+            st.warning(f"griddata 보간도 실패, 최근접 이웃 사용: {str(e2)}")
+            zi = griddata((x, y), df_long['Luminance'], (xi_grid, yi_grid), method='nearest')
     
     # 원형 마스크
     mask = xi_grid**2 + yi_grid**2 <= 1.02**2
@@ -204,8 +214,7 @@ def create_plotly_cartesian_plot(df_long, vmin, vmax, cmap='Jet', resolution=300
         zmax=vmax,
         showscale=True,
         colorbar=dict(
-            title="Luminance",
-            titleside="right"
+            title=dict(text="Luminance", side="right")
         ),
         hovertemplate='X: %{x:.2f}<br>Y: %{y:.2f}<br>Luminance: %{z:.2f}<extra></extra>'
     ))
@@ -268,144 +277,208 @@ def create_plotly_cartesian_plot(df_long, vmin, vmax, cmap='Jet', resolution=300
 def create_cross_section_plots(df_long, cross_type, cross_value):
     """크로스섹션 플롯 생성 (matplotlib로 PNG 저장용)"""
     
-    if cross_type == "Theta 고정":
-        # 특정 Theta 값에서 Phi에 따른 변화
-        df_section = df_long[df_long['Theta'] == cross_value].copy()
-        if df_section.empty:
-            # 가장 가까운 값 찾기
-            closest_theta = df_long['Theta'].iloc[(df_long['Theta'] - cross_value).abs().argsort()[:1]].values[0]
-            df_section = df_long[df_long['Theta'] == closest_theta].copy()
+    try:
+        if cross_type == "Theta 고정":
+            # 특정 Theta 값에서 Phi에 따른 변화
+            df_section = df_long[df_long['Theta'] == cross_value].copy()
+            if df_section.empty:
+                # 가장 가까운 값 찾기
+                closest_theta = df_long['Theta'].iloc[(df_long['Theta'] - cross_value).abs().argsort()[:1]].values[0]
+                df_section = df_long[df_long['Theta'] == closest_theta].copy()
+                st.info(f"정확한 Theta={cross_value}° 데이터가 없어 가장 가까운 {closest_theta}° 사용")
+                
+            df_section = df_section.sort_values('Phi')
             
-        df_section = df_section.sort_values('Phi')
-        
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-        
-        # 선형 플롯
-        ax1.plot(df_section['Phi'], df_section['Luminance'], 'b-o', linewidth=2, markersize=4)
-        ax1.set_xlabel('Phi (degrees)')
-        ax1.set_ylabel('Luminance')
-        ax1.set_title(f'Cross-section at Theta = {cross_value}°')
-        ax1.grid(True, alpha=0.3)
-        ax1.set_xlim(0, 360)
-        
-        # 극좌표 플롯
-        phi_rad = np.radians(df_section['Phi'])
-        ax2 = plt.subplot(122, projection='polar')
-        ax2.plot(phi_rad, df_section['Luminance'], 'r-o', linewidth=2, markersize=4)
-        ax2.set_title(f'Polar view: Theta = {cross_value}°')
-        ax2.set_theta_zero_location('E')
-        ax2.set_theta_direction(1)
-        
-    else:  # Phi 고정
-        # 특정 Phi 값에서 Theta에 따른 변화
-        df_section = df_long[df_long['Phi'] == cross_value].copy()
-        if df_section.empty:
-            # 가장 가까운 값 찾기
-            closest_phi = df_long['Phi'].iloc[(df_long['Phi'] - cross_value).abs().argsort()[:1]].values[0]
-            df_section = df_long[df_long['Phi'] == closest_phi].copy()
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
             
-        df_section = df_section.sort_values('Theta')
+            # 선형 플롯
+            ax1.plot(df_section['Phi'], df_section['Luminance'], 'b-o', linewidth=2, markersize=4)
+            ax1.set_xlabel('Phi (degrees)')
+            ax1.set_ylabel('Luminance')
+            ax1.set_title(f'Cross-section at Theta = {cross_value}°')
+            ax1.grid(True, alpha=0.3)
+            ax1.set_xlim(0, 360)
+            
+            # 극좌표 플롯
+            phi_rad = np.radians(df_section['Phi'])
+            ax2 = plt.subplot(122, projection='polar')
+            ax2.plot(phi_rad, df_section['Luminance'], 'r-o', linewidth=2, markersize=4)
+            ax2.set_title(f'Polar view: Theta = {cross_value}°')
+            ax2.set_theta_zero_location('E')
+            ax2.set_theta_direction(1)
+            
+        else:  # Phi 고정
+            # 특정 Phi 값에서 Theta에 따른 변화
+            df_section = df_long[df_long['Phi'] == cross_value].copy()
+            if df_section.empty:
+                # 가장 가까운 값 찾기
+                closest_phi = df_long['Phi'].iloc[(df_long['Phi'] - cross_value).abs().argsort()[:1]].values[0]
+                df_section = df_long[df_long['Phi'] == closest_phi].copy()
+                st.info(f"정확한 Phi={cross_value}° 데이터가 없어 가장 가까운 {closest_phi}° 사용")
+                
+            df_section = df_section.sort_values('Theta')
+            
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+            
+            # 선형 플롯
+            ax1.plot(df_section['Theta'], df_section['Luminance'], 'g-o', linewidth=2, markersize=4)
+            ax1.set_xlabel('Theta (degrees)')
+            ax1.set_ylabel('Luminance')
+            ax1.set_title(f'Cross-section at Phi = {cross_value}°')
+            ax1.grid(True, alpha=0.3)
+            
+            # 반지름 방향 플롯 (극좌표의 반지름 축)
+            ax2.plot(df_section['Theta'], df_section['Luminance'], 'm-o', linewidth=2, markersize=4)
+            ax2.set_xlabel('Theta (degrees) - Radial direction')
+            ax2.set_ylabel('Luminance')
+            ax2.set_title(f'Radial profile at Phi = {cross_value}°')
+            ax2.grid(True, alpha=0.3)
         
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        plt.tight_layout()
+        return fig
         
-        # 선형 플롯
-        ax1.plot(df_section['Theta'], df_section['Luminance'], 'g-o', linewidth=2, markersize=4)
-        ax1.set_xlabel('Theta (degrees)')
-        ax1.set_ylabel('Luminance')
-        ax1.set_title(f'Cross-section at Phi = {cross_value}°')
-        ax1.grid(True, alpha=0.3)
-        
-        # 반지름 방향 플롯 (극좌표의 반지름 축)
-        ax2.plot(df_section['Theta'], df_section['Luminance'], 'm-o', linewidth=2, markersize=4)
-        ax2.set_xlabel('Theta (degrees) - Radial direction')
-        ax2.set_ylabel('Luminance')
-        ax2.set_title(f'Radial profile at Phi = {cross_value}°')
-        ax2.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    return fig
+    except Exception as e:
+        st.error(f"크로스섹션 플롯 생성 중 오류: {str(e)}")
+        # 빈 figure 반환
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.text(0.5, 0.5, f"크로스섹션 생성 실패\n{str(e)}", 
+                ha='center', va='center', transform=ax.transAxes)
+        ax.set_title("Error in Cross-section Generation")
+        return fig
 
 def create_plotly_cross_section(df_long, cross_type, cross_value):
     """Plotly로 크로스섹션 플롯 생성"""
     
-    fig = make_subplots(
-        rows=1, cols=2,
-        subplot_titles=[f'Cross-section at {cross_type} = {cross_value}°', 'Polar View'],
-        specs=[[{"secondary_y": False}, {"type": "polar"}]]
-    )
-    
-    if cross_type == "Theta":
-        # 특정 Theta 값에서 Phi에 따른 변화
-        df_section = df_long[df_long['Theta'] == cross_value].copy()
-        if df_section.empty:
-            closest_theta = df_long['Theta'].iloc[(df_long['Theta'] - cross_value).abs().argsort()[:1]].values[0]
-            df_section = df_long[df_long['Theta'] == closest_theta].copy()
+    try:
+        fig = make_subplots(
+            rows=1, cols=2,
+            subplot_titles=[f'Cross-section at {cross_type} = {cross_value}°', 'Polar View'],
+            specs=[[{"secondary_y": False}, {"type": "polar"}]]
+        )
+        
+        if cross_type == "Theta":
+            # 특정 Theta 값에서 Phi에 따른 변화
+            df_section = df_long[df_long['Theta'] == cross_value].copy()
+            if df_section.empty:
+                closest_theta = df_long['Theta'].iloc[(df_long['Theta'] - cross_value).abs().argsort()[:1]].values[0]
+                df_section = df_long[df_long['Theta'] == closest_theta].copy()
+                st.info(f"정확한 Theta={cross_value}° 데이터가 없어 가장 가까운 {closest_theta}° 사용")
+                
+            df_section = df_section.sort_values('Phi')
             
-        df_section = df_section.sort_values('Phi')
-        
-        # 선형 플롯
-        fig.add_trace(
-            go.Scatter(x=df_section['Phi'], y=df_section['Luminance'], 
-                      mode='lines+markers', name='Luminance',
-                      line=dict(color='blue', width=2)),
-            row=1, col=1
-        )
-        
-        # 극좌표 플롯
-        fig.add_trace(
-            go.Scatterpolar(r=df_section['Luminance'], theta=df_section['Phi'],
-                          mode='lines+markers', name='Polar',
-                          line=dict(color='red', width=2)),
-            row=1, col=2
-        )
-        
-    else:  # Phi 고정
-        df_section = df_long[df_long['Phi'] == cross_value].copy()
-        if df_section.empty:
-            closest_phi = df_long['Phi'].iloc[(df_long['Phi'] - cross_value).abs().argsort()[:1]].values[0]
-            df_section = df_long[df_long['Phi'] == closest_phi].copy()
+            # 선형 플롯
+            fig.add_trace(
+                go.Scatter(x=df_section['Phi'], y=df_section['Luminance'], 
+                          mode='lines+markers', name='Luminance',
+                          line=dict(color='blue', width=2),
+                          hovertemplate='Phi: %{x}°<br>Luminance: %{y:.2f}<extra></extra>'),
+                row=1, col=1
+            )
             
-        df_section = df_section.sort_values('Theta')
+            # 극좌표 플롯
+            fig.add_trace(
+                go.Scatterpolar(r=df_section['Luminance'], theta=df_section['Phi'],
+                              mode='lines+markers', name='Polar',
+                              line=dict(color='red', width=2),
+                              hovertemplate='Phi: %{theta}°<br>Luminance: %{r:.2f}<extra></extra>'),
+                row=1, col=2
+            )
+            
+        else:  # Phi 고정
+            df_section = df_long[df_long['Phi'] == cross_value].copy()
+            if df_section.empty:
+                closest_phi = df_long['Phi'].iloc[(df_long['Phi'] - cross_value).abs().argsort()[:1]].values[0]
+                df_section = df_long[df_long['Phi'] == closest_phi].copy()
+                st.info(f"정확한 Phi={cross_value}° 데이터가 없어 가장 가까운 {closest_phi}° 사용")
+                
+            df_section = df_section.sort_values('Theta')
+            
+            # 선형 플롯
+            fig.add_trace(
+                go.Scatter(x=df_section['Theta'], y=df_section['Luminance'],
+                          mode='lines+markers', name='Luminance',
+                          line=dict(color='green', width=2),
+                          hovertemplate='Theta: %{x}°<br>Luminance: %{y:.2f}<extra></extra>'),
+                row=1, col=1
+            )
+            
+            # 반지름 방향 플롯
+            fig.add_trace(
+                go.Scatter(x=df_section['Theta'], y=df_section['Luminance'],
+                          mode='lines+markers', name='Radial',
+                          line=dict(color='magenta', width=2),
+                          hovertemplate='Theta: %{x}°<br>Luminance: %{y:.2f}<extra></extra>'),
+                row=1, col=2
+            )
         
-        # 선형 플롯
-        fig.add_trace(
-            go.Scatter(x=df_section['Theta'], y=df_section['Luminance'],
-                      mode='lines+markers', name='Luminance',
-                      line=dict(color='green', width=2)),
-            row=1, col=1
-        )
+        # 레이아웃 업데이트
+        fig.update_xaxes(title_text="Phi (degrees)" if cross_type == "Theta" else "Theta (degrees)", row=1, col=1)
+        fig.update_yaxes(title_text="Luminance", row=1, col=1)
         
-        # 반지름 방향 플롯
-        fig.add_trace(
-            go.Scatter(x=df_section['Theta'], y=df_section['Luminance'],
-                      mode='lines+markers', name='Radial',
-                      line=dict(color='magenta', width=2)),
-            row=1, col=2
+        if cross_type != "Theta":
+            fig.update_xaxes(title_text="Theta (degrees)", row=1, col=2)
+            fig.update_yaxes(title_text="Luminance", row=1, col=2)
+        
+        fig.update_layout(height=400, showlegend=True, title_text=f"Cross-section Analysis: {cross_type} = {cross_value}°")
+        
+        return fig
+        
+    except Exception as e:
+        st.error(f"Plotly 크로스섹션 생성 중 오류: {str(e)}")
+        # 에러 메시지가 포함된 빈 figure 반환
+        fig = go.Figure()
+        fig.add_annotation(
+            x=0.5, y=0.5,
+            text=f"크로스섹션 생성 실패<br>{str(e)}",
+            xref="paper", yref="paper",
+            showarrow=False,
+            font=dict(size=16, color="red")
         )
-    
-    # 레이아웃 업데이트
-    fig.update_xaxes(title_text="Phi (degrees)" if cross_type == "Theta" else "Theta (degrees)", row=1, col=1)
-    fig.update_yaxes(title_text="Luminance", row=1, col=1)
-    
-    if cross_type == "Theta":
-        fig.update_xaxes(title_text="Theta (degrees)", row=1, col=2)
-        fig.update_yaxes(title_text="Luminance", row=1, col=2)
-    
-    fig.update_layout(height=400, showlegend=True)
-    
-    return fig
+        fig.update_layout(
+            title="Error in Cross-section Generation",
+            xaxis=dict(showgrid=False, showticklabels=False),
+            yaxis=dict(showgrid=False, showticklabels=False)
+        )
+        return fig
 
 def save_plotly_as_html(fig, filename):
     """Plotly 그래프를 HTML로 저장"""
-    html_str = fig.to_html(include_plotlyjs='cdn')
-    return html_str.encode()
+    try:
+        html_str = fig.to_html(include_plotlyjs='cdn')
+        return html_str.encode()
+    except Exception as e:
+        st.error(f"HTML 저장 실패: {str(e)}")
+        # 기본 HTML 반환
+        error_html = f"""
+        <html>
+        <head><title>Error</title></head>
+        <body>
+        <h1>Plot Generation Error</h1>
+        <p>Error: {str(e)}</p>
+        </body>
+        </html>
+        """
+        return error_html.encode()
 
 def save_matplotlib_as_png(fig):
     """Matplotlib 그래프를 PNG 바이트로 저장"""
-    img_buffer = io.BytesIO()
-    fig.savefig(img_buffer, format='png', bbox_inches='tight', dpi=300)
-    img_buffer.seek(0)
-    return img_buffer.getvalue()
+    try:
+        img_buffer = io.BytesIO()
+        fig.savefig(img_buffer, format='png', bbox_inches='tight', dpi=300)
+        img_buffer.seek(0)
+        return img_buffer.getvalue()
+    except Exception as e:
+        st.error(f"PNG 저장 실패: {str(e)}")
+        # 빈 이미지 버퍼 반환
+        img_buffer = io.BytesIO()
+        plt.figure(figsize=(6, 4))
+        plt.text(0.5, 0.5, f"Image Generation Error\n{str(e)}", 
+                ha='center', va='center', transform=plt.gca().transAxes)
+        plt.title("Error")
+        plt.savefig(img_buffer, format='png', bbox_inches='tight', dpi=150)
+        plt.close()
+        img_buffer.seek(0)
+        return img_buffer.getvalue()
 
 def main():
     st.title("📊 Enhanced ISO Polar Plot Visualization")
@@ -526,63 +599,78 @@ def main():
                 
                 with col1:
                     st.subheader("Plotly Polar Plot")
-                    fig_polar = create_plotly_smooth_polar_plot(df_long, vmin, vmax, selected_cmap, resolution)
-                    st.plotly_chart(fig_polar, use_container_width=True)
-                    
-                    # HTML 저장 버튼
-                    html_data = save_plotly_as_html(fig_polar, "polar_plot.html")
-                    st.download_button(
-                        label="🌐 Polar Plot HTML 다운로드",
-                        data=html_data,
-                        file_name="iso_polar_plot.html",
-                        mime="text/html"
-                    )
+                    try:
+                        fig_polar = create_plotly_smooth_polar_plot(df_long, vmin, vmax, selected_cmap, resolution)
+                        st.plotly_chart(fig_polar, use_container_width=True)
+                        
+                        # HTML 저장 버튼
+                        html_data = save_plotly_as_html(fig_polar, "polar_plot.html")
+                        st.download_button(
+                            label="🌐 Polar Plot HTML 다운로드",
+                            data=html_data,
+                            file_name="iso_polar_plot.html",
+                            mime="text/html"
+                        )
+                    except Exception as e:
+                        st.error(f"Polar plot 생성 실패: {str(e)}")
+                        st.info("데이터나 설정을 확인해주세요.")
                 
                 with col2:
                     st.subheader("Plotly Cartesian Plot")
-                    fig_cartesian = create_plotly_cartesian_plot(df_long, vmin, vmax, selected_cmap, resolution)
-                    st.plotly_chart(fig_cartesian, use_container_width=True)
-                    
-                    # HTML 저장 버튼
-                    html_data_cart = save_plotly_as_html(fig_cartesian, "cartesian_plot.html")
-                    st.download_button(
-                        label="🌐 Cartesian Plot HTML 다운로드",
-                        data=html_data_cart,
-                        file_name="iso_cartesian_plot.html",
-                        mime="text/html"
-                    )
+                    try:
+                        fig_cartesian = create_plotly_cartesian_plot(df_long, vmin, vmax, selected_cmap, resolution)
+                        st.plotly_chart(fig_cartesian, use_container_width=True)
+                        
+                        # HTML 저장 버튼
+                        html_data_cart = save_plotly_as_html(fig_cartesian, "cartesian_plot.html")
+                        st.download_button(
+                            label="🌐 Cartesian Plot HTML 다운로드",
+                            data=html_data_cart,
+                            file_name="iso_cartesian_plot.html",
+                            mime="text/html"
+                        )
+                    except Exception as e:
+                        st.error(f"Cartesian plot 생성 실패: {str(e)}")
+                        st.info("데이터나 설정을 확인해주세요.")
 
             with tab2:
                 st.subheader(f"크로스섹션: {cross_type} = {cross_value}°")
                 
                 # Plotly 크로스섹션 (인터랙티브)
-                fig_cross_plotly = create_plotly_cross_section(df_long, cross_type.split()[0], cross_value)
-                st.plotly_chart(fig_cross_plotly, use_container_width=True)
-                
-                # HTML 저장 버튼
-                html_data_cross = save_plotly_as_html(fig_cross_plotly, "cross_section.html")
-                st.download_button(
-                    label="🌐 Cross-section HTML 다운로드",
-                    data=html_data_cross,
-                    file_name="cross_section.html",
-                    mime="text/html"
-                )
+                try:
+                    fig_cross_plotly = create_plotly_cross_section(df_long, cross_type.split()[0], cross_value)
+                    st.plotly_chart(fig_cross_plotly, use_container_width=True)
+                    
+                    # HTML 저장 버튼
+                    html_data_cross = save_plotly_as_html(fig_cross_plotly, "cross_section.html")
+                    st.download_button(
+                        label="🌐 Cross-section HTML 다운로드",
+                        data=html_data_cross,
+                        file_name="cross_section.html",
+                        mime="text/html"
+                    )
+                except Exception as e:
+                    st.error(f"인터랙티브 크로스섹션 생성 실패: {str(e)}")
                 
                 st.divider()
                 
                 # Matplotlib 크로스섹션 (PNG 저장용)
                 st.subheader("크로스섹션 (PNG 저장용)")
-                fig_cross_mpl = create_cross_section_plots(df_long, cross_type, cross_value)
-                st.pyplot(fig_cross_mpl)
-                
-                # PNG 저장 버튼
-                png_data = save_matplotlib_as_png(fig_cross_mpl)
-                st.download_button(
-                    label="🖼️ 크로스섹션 PNG 다운로드",
-                    data=png_data,
-                    file_name=f"cross_section_{cross_type.replace(' ', '_')}_{cross_value}.png",
-                    mime="image/png"
-                )
+                try:
+                    fig_cross_mpl = create_cross_section_plots(df_long, cross_type, cross_value)
+                    st.pyplot(fig_cross_mpl)
+                    
+                    # PNG 저장 버튼
+                    png_data = save_matplotlib_as_png(fig_cross_mpl)
+                    st.download_button(
+                        label="🖼️ 크로스섹션 PNG 다운로드",
+                        data=png_data,
+                        file_name=f"cross_section_{cross_type.replace(' ', '_')}_{cross_value}.png",
+                        mime="image/png"
+                    )
+                except Exception as e:
+                    st.error(f"PNG 크로스섹션 생성 실패: {str(e)}")
+                    st.info("다른 크로스섹션 값을 시도해보세요.")
 
             with tab3:
                 col1, col2 = st.columns(2)
