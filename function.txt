@@ -1,0 +1,41 @@
+function [theta, phi] = fun_hv_to_thetaphi(h, v)
+
+if h >= 0 && v >= 0
+
+theta = atan(sqrt(((tan(h/180*pi))^2+(tan(v/180*pi))^2)))/pi*180;
+
+phi = atan(tan(v/180*pi)/tan(h/180*pi))/pi*180;
+
+end
+
+if h < 0 && v >= 0
+
+theta = atan(sqrt(((tan(h/180*pi))^2+(tan(v/180*pi))^2)))/pi*180;
+
+phi = atan(tan(v/180*pi)/tan(h/180*pi))/pi*180 + 180;
+
+end
+
+if h < 0 && v < 0
+
+theta = atan(sqrt(((tan(h/180*pi))^2+(tan(v/180*pi))^2)))/pi*180;
+
+phi = atan(tan(v/180*pi)/tan(h/180*pi))/pi*180 + 180;
+
+end
+
+if h >= 0 && v < 0
+
+theta = atan(sqrt(((tan(h/180*pi))^2+(tan(v/180*pi))^2)))/pi*180;
+
+phi = atan(tan(v/180*pi)/tan(h/180*pi))/pi*180 + 360;
+
+end
+
+if h==0 && v==0
+
+theta = 0; phi = 0;
+
+end
+
+end
