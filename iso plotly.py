@@ -158,7 +158,7 @@ def create_plotly_smooth_polar_plot(df_long, vmin, vmax, cmap='Jet', resolution=
             angularaxis=dict(
                 visible=False,  # 각도 축 숨김
                 direction='clockwise',
-                rotation=90
+                rotation=0  # rotation을 0으로 변경
             )
         ),
         width=700,
@@ -168,6 +168,7 @@ def create_plotly_smooth_polar_plot(df_long, vmin, vmax, cmap='Jet', resolution=
     )
     
     return fig
+
 
 def create_plotly_cartesian_plot(df_long, vmin, vmax, cmap='Jet', resolution=300):
     """Plotly로 직교좌표계 플롯 생성 - 숫자 라벨 제거"""
